@@ -17,8 +17,8 @@ import {
 } from 'react-native';
 
 import {Colors} from 'react-native/Libraries/NewAppScreen';
-import StackNavigator from './navigation/StackNavigator';
-import {AuthProvider} from './AuthContext';
+import StackNavigator from './src/navigation/StackNavigator';
+import {AuthProvider} from './src/AuthContext';
 
 function App() {
   return (

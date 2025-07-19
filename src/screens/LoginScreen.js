@@ -10,7 +10,7 @@ import React, {useEffect, useState, useContext} from 'react';
 import {GoogleSignin} from '@react-native-google-signin/google-signin';
 import axios from 'axios';
 import AsyncStorage from '@react-native-async-storage/async-storage';
-import {AuthContext} from '../AuthContext';
+import {AuthContext} from '../AuthContext.js';
 import {googleAuth} from '../api.js';
 
 // Adjust the import path as necessary

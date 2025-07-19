@@ -5,6 +5,7 @@ import { jwtDecode } from 'jwt-decode';
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import 'core-js/stable/atob';
 import axios from 'axios';
+import LandingPage from '../calling.component/landingPage.jsx';
 
 
 
@@ -90,11 +91,12 @@ const HomeScreen = () => {
             <Text style={styles.info}>Email: {user.email}</Text>
             <Image
             source={{ uri: user.picture }}
-            style={{ width: 100, height: 100, borderRadius: 50, marginTop: 10 }}
+            style={{ width: 50, height: 50, borderRadius: 50, marginTop: 10 }}
             resizeMode="cover"
             />
           </View>
         )}
+        <LandingPage />
          <Pressable style={styles.logoutButton} onPress={logout}>
           <Text style={styles.logoutText}>Logout</Text>
         </Pressable>
@@ -112,6 +114,7 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     alignItems: 'center',
     padding: 20,
+
   },
   card: {
     backgroundColor: '#FFFFFF',
@@ -119,12 +122,14 @@ const styles = StyleSheet.create({
     borderRadius: 16,
     width: '100%',
     maxWidth: 360,
+    height: '100%',
     alignItems: 'center',
     shadowColor: '#000',
     shadowOpacity: 0.1,
     shadowOffset: { width: 0, height: 2 },
     shadowRadius: 8,
     elevation: 5,
+    // gap: 50,
   },
   title: {
     fontSize: 24,
