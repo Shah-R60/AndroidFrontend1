@@ -1,7 +1,12 @@
 import React, { useEffect, useRef, useState } from 'react';
-import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, Alert } from 'react-native';
+import { View, Text, TouchableOpacity, StyleSheet, SafeAreaView, Alert, Platform, PermissionsAndroid } from 'react-native';
 import { useNavigation } from '@react-navigation/native';
-import { mediaDevices, RTCPeerConnection, RTCSessionDescription, RTCIceCandidate } from 'react-native-webrtc';
+import {
+  mediaDevices,
+  RTCPeerConnection,
+  RTCSessionDescription,
+  RTCIceCandidate,
+} from 'react-native-webrtc';
 import Icon from 'react-native-vector-icons/FontAwesome';
 import Icon5 from 'react-native-vector-icons/FontAwesome5';
 import { useSocket } from '../context/SocketContext';
@@ -14,6 +19,7 @@ export default function ChatPage() {
   const [duration, setDuration] = useState(0);
   const [startTime, setStartTime] = useState(null);
   const [showSafetyMsg, setShowSafetyMsg] = useState(true);
+  const [showConnectedMsg, setShowConnectedMsg] = useState(false);
   const socket = useSocket();
   const socketRef = useRef();
   const pcRef = useRef();
@@ -22,25 +28,53 @@ export default function ChatPage() {
   const navigation = useNavigation();
 
   useEffect(() => {
-    if (!socket) return;
+    if (!socket) {
+      console.log('Socket not available, waiting for connection...');
+      setStatus('Connecting to server...');
+      return;
+    }
+    
+    console.log('Socket available:', socket.id);
     socketRef.current = socket;
 
+    // Check if socket is connected
+    if (socket.connected) {
+      console.log('Socket already connected with ID:', socket.id);
+      setMyId(socket.id);
+      setStatus('Looking for a partner...');
+      socket.emit('find_partner');
+    } else {
+      console.log('Socket not connected yet, waiting...');
+      setStatus('Connecting to server...');
+    }
+
     socketRef.current.on('connect', () => {
+      console.log('Socket connected with ID:', socketRef.current.id);
       setMyId(socketRef.current.id);
+      setStatus('Looking for a partner...');
+      socketRef.current.emit('find_partner');
     });
-    setStatus('Looking for a partner...');
-    socketRef.current.emit('find_partner');
 
     socketRef.current.on('partner_found', async ({ partnerId, startTime, shouldInitiate }) => {
+      console.log('Partner found:', partnerId, 'Should initiate:', shouldInitiate);
       setPartnerId(partnerId);
       setStartTime(startTime);
       setStatus('Partner found! Connecting...');
       await startCall(partnerId, shouldInitiate);
     });
 
+    socketRef.current.on('waiting_for_partner', () => {
+      console.log('Waiting for partner...');
+      setStatus('Looking for a partner...');
+    });
+
     socketRef.current.on('signal', async ({ from, data }) => {
-      if (!pcRef.current) return;
+      if (!pcRef.current) {
+        console.log('No peer connection available');
+        return;
+      }
       try {
+        console.log('Received signal:', data.type || 'candidate');
         if (data.type === 'offer') {
           await pcRef.current.setRemoteDescription(new RTCSessionDescription(data));
           const answer = await pcRef.current.createAnswer();
@@ -52,7 +86,7 @@ export default function ChatPage() {
           await pcRef.current.addIceCandidate(new RTCIceCandidate(data.candidate));
         }
       } catch (e) {
-        console.error(e);
+        console.error('Signal handling error:', e);
       }
     });
 
@@ -70,12 +104,16 @@ export default function ChatPage() {
     });
 
     return () => {
+      console.log('Cleaning up ChatPage...');
       cleanup();
-      socketRef.current.off('connect');
-      socketRef.current.off('partner_found');
-      socketRef.current.off('signal');
-      socketRef.current.off('partner_disconnected');
-      socketRef.current.off('force_disconnect');
+      if (socketRef.current) {
+        socketRef.current.off('connect');
+        socketRef.current.off('partner_found');
+        socketRef.current.off('waiting_for_partner');
+        socketRef.current.off('signal');
+        socketRef.current.off('partner_disconnected');
+        socketRef.current.off('force_disconnect');
+      }
     };
   }, [socket]);
 
@@ -87,26 +125,78 @@ export default function ChatPage() {
     }
   }, []);
 
+  // Function to request microphone permission
+  const requestMicrophonePermission = async () => {
+    if (Platform.OS === 'android') {
+      try {
+        const granted = await PermissionsAndroid.request(
+          PermissionsAndroid.PERMISSIONS.RECORD_AUDIO,
+          {
+            title: 'Microphone Permission',
+            message: 'This app needs access to your microphone to make voice calls.',
+            buttonNeutral: 'Ask Me Later',
+            buttonNegative: 'Cancel',
+            buttonPositive: 'OK',
+          }
+        );
+        
+        if (granted !== PermissionsAndroid.RESULTS.GRANTED) {
+          Alert.alert(
+            'Permission Denied',
+            'Microphone permission is required to make voice calls. Please enable it in app settings.',
+            [{ text: 'OK' }]
+          );
+          return false;
+        }
+        return true;
+      } catch (err) {
+        console.error('Permission request error:', err);
+        return false;
+      }
+    }
+    return true; // iOS permissions are handled differently
+  };
+
   async function startCall(partnerId, isInitiator) {
+    console.log('Starting call with partner:', partnerId, 'Is initiator:', isInitiator);
+    
+    // Request microphone permission first
+    const hasPermission = await requestMicrophonePermission();
+    if (!hasPermission) {
+      setStatus('Microphone permission required to start call.');
+      return;
+    }
+    
     pcRef.current = new RTCPeerConnection({
-      iceServers: [{ urls: 'stun:stun.l.google.com:19302' }, { urls: 'stun:stun1.l.google.com:19302' }]
+      iceServers: [
+        { urls: 'stun:stun.l.google.com:19302' }, 
+        { urls: 'stun:stun1.l.google.com:19302' }
+      ]
     });
 
     pcRef.current.onicecandidate = event => {
       if (event.candidate) {
+        console.log('Sending ICE candidate');
         socketRef.current.emit('signal', { to: partnerId, data: { candidate: event.candidate } });
       }
     };
 
     pcRef.current.onaddstream = event => {
-      // Remote audio stream received; it'll play automatically
       console.log('Received remote stream');
+      // Remote audio stream received; it'll play automatically
     };
 
     try {
+      console.log('Requesting microphone access...');
       const stream = await mediaDevices.getUserMedia({ audio: true, video: false });
+      console.log('Got local stream');
       localStreamRef.current = stream;
-      pcRef.current.addStream(stream);
+      
+      // Use addTrack instead of deprecated addStream
+      stream.getTracks().forEach(track => {
+        console.log('Adding local track:', track.kind);
+        pcRef.current.addTrack(track, stream);
+      });
 
       // Wait for ICE gathering or timeout
       await new Promise(res => {
@@ -121,6 +211,7 @@ export default function ChatPage() {
       });
 
       if (isInitiator) {
+        console.log('Creating offer...');
         const offer = await pcRef.current.createOffer();
         await pcRef.current.setLocalDescription(offer);
         socketRef.current.emit('signal', { to: partnerId, data: offer });
@@ -128,9 +219,11 @@ export default function ChatPage() {
 
       setCallActive(true);
       setStatus('Connected! You are now talking.');
+      setShowConnectedMsg(true);
 
       // Start timer
-      setDuration(Math.floor((Date.now() - startTime) / 1000));
+      const currentTime = Date.now();
+      setDuration(Math.floor((currentTime - startTime) / 1000));
       const interval = setInterval(() => {
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
         setDuration(elapsed);
@@ -142,8 +235,20 @@ export default function ChatPage() {
         }
       }, 1000);
     } catch (err) {
-      console.error(err);
-      setStatus('Microphone access denied.');
+      console.error('Error starting call:', err);
+      
+      if (err.name === 'SecurityError' || err.name === 'NotAllowedError') {
+        setStatus('Microphone access denied. Please allow microphone permission and try again.');
+        Alert.alert(
+          'Permission Required',
+          'Microphone access is required to make voice calls. Please enable microphone permission in your device settings and try again.',
+          [{ text: 'OK' }]
+        );
+      } else if (err.name === 'NotFoundError') {
+        setStatus('No microphone found on this device.');
+      } else {
+        setStatus('Failed to start call. Please try again.');
+      }
     }
   }
 
@@ -160,7 +265,10 @@ export default function ChatPage() {
   }
 
   function leaveCall() {
-    if (socketRef.current && partnerId) socketRef.current.emit('leave_call', { to: partnerId });
+    console.log('Leaving call...');
+    if (socketRef.current && partnerId) {
+      socketRef.current.emit('leave_call', { to: partnerId });
+    }
     cleanup();
     navigation.navigate('Home');
   }
